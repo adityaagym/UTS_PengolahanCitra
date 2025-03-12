@@ -1,0 +1,336 @@
+import PIL
+from PIL import Image, ImageTk
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+img = None
+img_array = None
+grayimg = None
+
+
+def display_image(image, panel):
+    image_display = Image.fromarray(image)
+    image_display = ImageTk.PhotoImage(image_display)
+    panel.config(image=image_display)
+    panel.image = image_display
+
+
+def upload():
+    global img_array
+    f_types = [("Image Files", "*.png;*.jpg;*.jpeg;*.bmp")] 
+    path = filedialog.askopenfilename(filetypes=f_types)
+
+    if not path:
+        return
+
+    img_array = cv2.imread(path)
+    img_array = cv2.resize(img_array, (300, 300))
+    img_array = cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB)
+
+    display_image(img_array, original_canvas)
+
+
+def grayscale(method=1, shades=256):
+    global img_array, grayimg
+
+    if img_array is None:
+        return
+
+    img_data = np.array(img_array).astype(np.int32)
+    height, width, _ = img_data.shape
+    grayimg = np.zeros((height, width), dtype=np.uint8)
+
+    for i in range(height):
+        for j in range(width):
+            r, g, b = img_data[i, j]
+            if method == 1: # Metode 1: Rata-rata (Average)
+                gray = (r + g + b) / 3  
+            elif method == 2: # Metode 2: Perceptual Grayscale
+                gray = int(r * 0.299 + g * 0.587 + b * 0.114)
+            elif method == 3: # Metode 3: Luminosity ((Max + Min)2)
+                gray = (max(r, g, b) + min(r, g, b)) // 2
+            elif method == 4: # Metode 4: Komponen Tunggal (Merah)
+                gray = r  
+            elif method == 5: # Metode 5: Komponen Tunggal (Hijau)
+                gray = g   
+            elif method == 6: # Metode 6: Komponen Tunggal (Biru)
+                gray = b
+            elif method == 7: # Metode 7: Max Komponen
+                gray = max(r, g, b)
+            elif method == 8: # Metode 8: Min Komponen 
+                gray = min(r, g, b)
+            elif method == 9: # Metode 9: Conversion Factor (255 Shades)
+                conversion_factor = 255 / (shades - 1)
+                avg_value = (r + g + b) / 3
+                gray = int((avg_value / conversion_factor) + 0.5) * conversion_factor
+            
+            grayimg[i, j] = np.clip(gray, 0, 255)
+
+    display_image(grayimg, grayscale_canvas)
+
+
+
+def jalankan():
+    global img_array
+    if img_array is None:
+        messagebox.showerror("Error", "Silakan upload gambar terlebih dahulu sebelum bisa menerapkan Grayscale!")
+        return
+
+    method_text = pilih_method_grayscale.get().strip()
+    if method_text == "Pilih Method:" or method_text == "":
+        messagebox.showerror("Error", "Silakan pilih metode Grayscale terlebih dahulu!")
+        return
+    
+    methods = {
+        '1 - GRAYSCALE-Rata-rata': 1,  
+        '2 - GRAYSCALE-Perceptual Grayscale': 2,
+        '3 - GRAYSCALE-Luminosity': 3,
+        '4 - GRAYSCALE-Komponen Tunggal (Merah)': 4,
+        '5 - GRAYSCALE-Komponen Tunggal (Hijau)': 5,
+        '6 - GRAYSCALE-Komponen Tunggal (Biru)': 6,
+        '7 - GRAYSCALE-Max Komponen': 7,
+        '8 - GRAYSCALE-Min Komponen': 8,
+        '9 - GRAYSCALE-Conversion Factor (255 Shades)': 9
+    }
+
+    if method_text not in methods:
+        messagebox.showerror("Error", "Metode Grayscale tidak valid!")
+        return
+
+    method_number = int(method_text.split(" - ")[0])
+    grayscale(method_number)
+
+
+
+def histogram():
+    global grayimg
+
+    if grayimg is None or grayimg.size == 0:
+        messagebox.showerror("Error", "Gambar grayscale belum dibuat! Silakan jalankan proses Grayscale terlebih dahulu.")
+        return
+
+    histogram, _ = np.histogram(grayimg.flatten(), bins=256, range=[0,256])
+
+    plt.figure(figsize=(6, 3))
+    plt.bar(range(256), histogram, color='gray')
+    plt.title("Histogram Grayscale")
+    plt.xlabel("Pixel Intensity")
+    plt.ylabel("Frequency")
+    plt.savefig("histogram.png", bbox_inches='tight')
+    plt.close()
+
+    hist_img = Image.open("histogram.png")
+    hist_img = hist_img.resize((600, 300))
+    hist_tk = ImageTk.PhotoImage(hist_img)
+
+    histogram_canvas.config(image=hist_tk)
+    histogram_canvas.image = hist_tk
+
+
+def convolve_image(image, kernel):
+    kernel_size = kernel.shape[0]
+    pad = kernel_size // 2
+    if len(image.shape) == 3:
+        h, w, c = image.shape
+        output = np.zeros((h, w, c), dtype=np.uint8)
+        padded_img = np.pad(image, ((pad, pad), (pad, pad), (0, 0)), mode='constant', constant_values=0)
+        
+        for i in range(h):
+            for j in range(w):
+                for ch in range(c):
+                    region = padded_img[i:i+kernel_size, j:j+kernel_size, ch]
+                    output[i, j, ch] = np.clip(np.sum(region * kernel), 0, 255)
+    
+    else:
+        h, w = image.shape
+        output = np.zeros((h, w), dtype=np.uint8)
+        padded_img = np.pad(image, ((pad, pad), (pad, pad)), mode='constant', constant_values=0)
+
+        for i in range(h):
+            for j in range(w):
+                region = padded_img[i:i+kernel_size, j:j+kernel_size]
+                output[i, j] = np.clip(np.sum(region * kernel), 0, 255)
+
+    return output
+
+
+def apply_convolution():
+    global img_array, gray_img
+    if img_array is None:
+        messagebox.showerror("Error", "Silakan upload gambar terlebih dahulu sebelum bisa menerapkan Konvolusi!")
+        return
+    
+    if grayimg is None:
+        messagebox.showerror("Error", "Silakan jalankan grayscale terlebih dahulu sebelum bisa menerapkan Konvolusi!")
+        return
+
+    kernel_type = pilih_method_Konvolusi.get().strip()
+    if kernel_type == "Pilih Method:" or kernel_type == "":
+        messagebox.showerror("Error", "Silakan pilih metode Konvolusi terlebih dahulu!")
+        return
+
+    kernels = {
+        "Box Blur": np.array([[1, 1, 1], 
+                              [1, 1, 1], 
+                              [1, 1, 1]]) / 9,
+        "Gaussian Blur 3x3": np.array([[1, 2, 1], 
+                                       [2, 4, 2], 
+                                       [1, 2, 1]]) / 16,
+        "Gaussian Blur 5x5": np.array([[1, 4, 6, 4, 1],
+                                       [4, 16, 24, 16, 4],
+                                       [6, 24, 36, 24, 6],
+                                       [4, 16, 24, 16, 4],
+                                       [1, 4, 6, 4, 1]]) / 256,
+        "Identity": np.array([[0, 0, 0], 
+                              [0, 1, 0], 
+                              [0, 0, 0]]),
+        "Edge Detection": np.array([[0, -1, 0], 
+                                    [-1, 4, -1], 
+                                    [0, -1, 0]])
+    }
+
+    if kernel_type not in kernels:
+        messagebox.showerror("Error", "Metode Konvolusi tidak tersedia!")
+        return
+    
+    kernel = kernels[kernel_type]
+    
+    convolved_original = convolve_image(img_array, kernel)
+    display_image(convolved_original, konvolusi_original)
+
+    convolved_grayscale = convolve_image(grayimg, kernel)
+    display_image(convolved_grayscale, konvolusi_grayscale)
+
+
+# === Inisialisasi Tkinter ===
+root = tk.Tk()
+root.title("IMAGE PROCESSING")
+root.geometry("900x600")
+
+
+# === Membuat Canvas dengan Scrollbar ===
+canvas = tk.Canvas(root)
+scroll_y = tk.Scrollbar(root, orient="vertical", command=canvas.yview)
+
+frame_scrollable = tk.Frame(canvas)
+
+frame_scrollable.bind(
+    "<Configure>",
+    lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+)
+
+canvas_frame = canvas.create_window((450, 0), window=frame_scrollable, anchor="n")
+
+canvas.configure(yscrollcommand=scroll_y.set)
+
+canvas.pack(side="left", fill="both", expand=True)
+scroll_y.pack(side="right", fill="y")
+
+# Update posisi saat window diubah ukurannya
+def update_position(event):
+    canvas.itemconfig(canvas_frame, width=event.width, anchor="n")
+
+canvas.bind("<Configure>", update_position)
+
+def on_mouse_wheel(event):
+    canvas.yview_scroll(-1*(event.delta//120), "units")
+
+root.bind_all("<MouseWheel>", on_mouse_wheel)
+root.bind_all("<Button-4>", on_mouse_wheel)
+root.bind_all("<Button-5>", on_mouse_wheel)
+
+
+#Label Utama
+label_utama = tk.Label(frame_scrollable, text="Tekan tombol untuk menjalankan fungsi yang tertulis",
+              fg="white", bg="purple", relief="groove", font=('Verdana', 15))
+label_utama.pack(fill=tk.X, pady=10)  
+
+
+# === Frame untuk Tombol Grayscale===
+frame_buttons_grayscale = tk.Frame(frame_scrollable)
+frame_buttons_grayscale.pack(pady=5)
+
+btn_upload = tk.Button(frame_buttons_grayscale, text="Upload", fg="black", bg="lavender", command=lambda: root.after(100, upload))
+btn_upload.pack(side=tk.LEFT, padx=10)
+
+n_grayscale = tk.StringVar()
+n_grayscale.set("Pilih Method:")
+pilih_method_grayscale = ttk.Combobox(frame_buttons_grayscale, width=40, textvariable=n_grayscale)
+pilih_method_grayscale['values'] = (
+    '1 - GRAYSCALE-Rata-rata',  
+    '2 - GRAYSCALE-Perceptual Grayscale',
+    '3 - GRAYSCALE-Luminosity',
+    '4 - GRAYSCALE-Komponen Tunggal (Merah)',
+    '5 - GRAYSCALE-Komponen Tunggal (Hijau)',
+    '6 - GRAYSCALE-Komponen Tunggal (Biru)',
+    '7 - GRAYSCALE-Max Komponen',
+    '8 - GRAYSCALE-Min Komponen',
+    '9 - GRAYSCALE-Conversion Factor (255 Shades)'
+)
+pilih_method_grayscale.pack(side=tk.LEFT, padx=5)
+
+btn_jalankan_grayscale = tk.Button(frame_buttons_grayscale, text="Jalankan", fg="black", bg="skyblue", command=lambda: root.after(100, jalankan))
+btn_jalankan_grayscale.pack(side=tk.LEFT, padx=10)
+
+
+# === Frame untuk Gambar Grayscale===
+frame_grayscale = tk.Frame(frame_scrollable)
+frame_grayscale.pack(pady=20)
+
+original_canvas = tk.Label(frame_grayscale, borderwidth=5, relief="sunken")
+original_canvas.pack(side=tk.LEFT, padx=20)
+
+grayscale_canvas = tk.Label(frame_grayscale, borderwidth=5, relief="sunken")
+grayscale_canvas.pack(side=tk.LEFT, padx=20)
+
+
+# === Frame untuk Histogram===
+frame_histogram = tk.Frame(frame_scrollable)
+frame_histogram.pack(pady=10)
+
+btn_histogram = tk.Button(frame_histogram, text="Histogram", fg="black", bg="powderblue", command=lambda: root.after(100, histogram))
+btn_histogram.pack(pady=20)
+
+histogram_canvas = tk.Label(frame_histogram, borderwidth=5, relief="sunken")
+histogram_canvas.pack(padx=20)
+
+
+# === Frame untuk Tombol Konvolusi===
+frame_tombol_konvolusi = tk.Frame(frame_scrollable)
+frame_tombol_konvolusi.pack(pady=20)
+
+n_konvolusi = tk.StringVar()
+n_konvolusi.set("Pilih Method:")
+pilih_method_Konvolusi = ttk.Combobox(frame_tombol_konvolusi, width=40, textvariable=n_konvolusi)
+pilih_method_Konvolusi['values'] = (
+    'Box Blur',  
+    'Gaussian Blur 3x3',
+    'Gaussian Blur 5x5',
+    'Identity',
+    'Edge Detection',
+)
+pilih_method_Konvolusi.pack(side=tk.LEFT ,padx=5)
+
+btn_jalankan_konvolusi = tk.Button(frame_tombol_konvolusi, text="Jalankan", fg="black", bg="lightskyblue", command=lambda: root.after(100, apply_convolution))
+btn_jalankan_konvolusi.pack(padx=10)
+
+
+# === Frame untuk Gambar Konvolusi===
+frame_gambar_konvolusi = tk.Frame(frame_scrollable)
+frame_gambar_konvolusi.pack(pady=20)
+
+konvolusi_original = tk.Label(frame_gambar_konvolusi, borderwidth=5, relief="sunken")
+konvolusi_original.pack(side=tk.LEFT, padx=20)
+
+konvolusi_grayscale= tk.Label(frame_gambar_konvolusi, borderwidth=5, relief="sunken")
+konvolusi_grayscale.pack(side=tk.LEFT, padx=20)
+
+
+
+
+# === Menjalankan Aplikasi ===
+root.mainloop()
